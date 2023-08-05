@@ -291,6 +291,7 @@ class TestWithJonathanWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         #from tkinter.filedialog import askdirectory
         import numpy as np
         import csv
+        from matplotlib import pyplot as plt
         from scipy.stats import linregress
         
         # Arrays to store our table data
@@ -298,10 +299,14 @@ class TestWithJonathanWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         indexCol.SetName("Index")
         occupiedCol = vtk.vtkIntArray()
         occupiedCol.SetName("Cubes Occupied")
+        occupiedColCube = vtk.vtkIntArray()
+        occupiedColCube.SetName("Cubes Occupied (Cube FD)")
         cubeCol = vtk.vtkDoubleArray()
         cubeCol.SetName("Num Cubes")
         fractalCol = vtk.vtkDoubleArray()
-        fractalCol.SetName("Fractal Dimension")
+        fractalCol.SetName("Fractal Dimension Divided")
+        fractalColCube = vtk.vtkDoubleArray()
+        fractalColCube.SetName("Fractal Dimension Cubes")
         
         # Column for indexing
         for i in range(1,21):
@@ -336,6 +341,94 @@ class TestWithJonathanWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         print("segmentData Dimension", segmentData.shape)
         print("Sample SubMatrix", segmentData[300:310, 300:310, 100:110])
 
+
+        # Fractal dimension with cubes
+        
+        def padArray(A, divideNum):
+
+            if (A.shape[0] % divideNum) != 0:
+                addNum = divideNum - (A.shape[0] % divideNum)
+                zerosD1 = np.zeros([addNum,A.shape[1],A.shape[2]])
+                A = np.vstack((A,zerosD1))
+
+            if (A.shape[1] % divideNum) != 0:
+                addNum = divideNum - (A.shape[1] % divideNum)
+                zerosD2 = np.zeros([A.shape[0],addNum,A.shape[2]])
+                A = np.hstack((A,zerosD2))
+
+            if (A.shape[2] % divideNum) != 0:
+                addNum = divideNum - (A.shape[2] % divideNum)
+                zerosD3 = np.zeros([A.shape[0],A.shape[1],addNum])
+                A = np.dstack((A,zerosD3))
+
+            return(A)
+            
+            
+        d1 = segmentData.shape[0]
+        d2 = segmentData.shape[1]
+        d3 = segmentData.shape[2]
+        start_subdiv = 1
+        end_subdiv = 21
+
+        # To get equal dimension cubes, the `i` variable needs to scaled in each dimension
+
+        # Try make it a true Cube
+        # min_d = np.min(segmentData.shape)
+        # segmentData = segmentData[:min_d, :min_d, :min_d]
+
+        totalCubes = []
+        containingCubes = []
+        lineLength = []
+        for i in range(start_subdiv, end_subdiv):
+            # grid size is the shortest dimension divided by the number
+            # of subdivisions, i
+            d_min = np.min([d1, d2, d3])
+            grid_size = int(d_min/i)
+            
+
+            # Get the total cube count, which is the number of
+            # subdivisions along each dimension
+            # lineLength.append(d_min/i)
+            lineLength = np.append(lineLength, d_min/i)
+            
+            contCount = 0
+            paddedArray = padArray(segmentData, grid_size)
+            # Find the number of subdivisions along each dimension
+            # such that the grid is uniform
+            s1 = int(paddedArray.shape[0]/grid_size)
+            s2 = int(paddedArray.shape[1]/grid_size)
+            s3 = int(paddedArray.shape[2]/grid_size)
+            cNum = s1*s2*s3
+            totalCubes.append(cNum)
+
+            D1 = np.dsplit(paddedArray, s3)
+            for j in D1:
+                D2 = np.hsplit(j, s2)
+                for k in D2:
+                    D3 = np.vsplit(k, s1)
+                    for C in D3:
+                        # print(C.shape)
+                        if np.any(C) == True:
+                            contCount +=1
+            occupiedColCube.InsertNextValue(contCount)
+            containingCubes = np.append(containingCubes, contCount)
+            
+            
+            def fractDim(lineLength, numBoxes):
+                #fit a line to these data to get the slope
+                lineStats = linregress(np.log(1/lineLength),np.log(numBoxes))
+                #print(lineStats)
+                return(lineStats)
+
+        lineLength = np.array(lineLength)
+        containingCubes = np.array(containingCubes)
+        FD = fractDim(lineLength, containingCubes)
+        fractalDimension = np.around(FD[0],2)
+            
+        fractalColCube.InsertNextValue(fractalDimension)
+        
+
+        # ORIGINALLY DONE
         # Calculations
         def padArray(A, divideNum):
 
@@ -355,7 +448,7 @@ class TestWithJonathanWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
                 A = np.dstack((A,zerosD3))
 
             return(A)
-        
+
         d1 = segmentData.shape[0]
         d2 = segmentData.shape[1]
         d3 = segmentData.shape[2]
@@ -381,20 +474,22 @@ class TestWithJonathanWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
                             contCount +=1
             occupiedCol.InsertNextValue(contCount)
             containingCubes.append(contCount)
-            
+
         def fractDim(lineLength, numBoxes):
             #fit a line to these data to get the slope
             lineStats = linregress(np.log(1/lineLength),np.log(numBoxes))
             return(lineStats)
-            
+
         lineLength = np.array(lineLength)
         containingCubes = np.array(containingCubes)
         FD = fractDim(lineLength, containingCubes)
         fractalDimension = np.around(FD[0],2)
         print(fractalDimension)
-        
+
         # Column to print the fractal dimension
         fractalCol.InsertNextValue(fractalDimension)
+        
+        # DONE WITH SPLITTING INTO CUBES
         
         
         
@@ -419,7 +514,10 @@ class TestWithJonathanWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         resultTableNode.AddColumn(indexCol)
         resultTableNode.AddColumn(cubeCol)
         resultTableNode.AddColumn(occupiedCol)
+        resultTableNode.AddColumn(occupiedColCube)
         resultTableNode.AddColumn(fractalCol)
+        resultTableNode.AddColumn(fractalColCube)
+        
         
         # Showing the table in view layout
         slicer.app.layoutManager().setLayout(slicer.vtkMRMLLayoutNode.SlicerLayoutFourUpTableView)
